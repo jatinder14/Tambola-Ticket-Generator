@@ -13,47 +13,39 @@ const dbConfig = {
 };
 
 const pool = mysql.createPool(dbConfig);
-// ... (other code)
 
-// const { spawn } = require('child_process');
+// ... (your existing code)
 
-app.post('/generate-tickets/:numSets', async (req, res) => {
-    const numSets = parseInt(req.params.numSets);
+app.get('/generate-tickets', (req, res) => {
+    const process = spawn('java', ['-jar', './Solution.jar']);
 
     let javaOutput = '';
 
-    // Loop to call the Java process N times
-    for (let i = 0; i < numSets; i++) {
-        const process = spawn('java', ['-jar', './Solution.jar']);
+    process.stdout.on('data', (data) => {
+        javaOutput += data.toString();
+    });
 
-        process.stdout.on('data', (data) => {
-            javaOutput += data.toString();
-        });
+    process.stderr.on('data', (data) => {
+        console.error(`Java process stderr: ${data}`);
+    });
 
-        process.stderr.on('data', (data) => {
-            console.error(`Java process stderr: ${data}`);
-        });
+    process.on('exit', (code) => {
+        if (code === 0) {
+            console.log(`Java process output: ${javaOutput}`);
 
-        await new Promise((resolve) => {
-            process.on('exit', (code) => {
-                if (code === 0) {
-                    console.log(`Java process ${i + 1} output received.`);
+            // Parse the javaOutput and insert data into MySQL
+            const tickets = parseJavaOutput(javaOutput);
+            insertTicketsIntoDB(tickets, (err) => {
+                if (err) {
+                    console.error(`Error inserting data into MySQL: ${err.message}`);
+                    res.status(500).send('Error generating tickets.');
                 } else {
-                    console.error(`Error generating tickets. Java process ${i + 1} exited with code ${code}`);
+                    res.send('Tickets generated and saved successfully.');
                 }
-                resolve();
             });
-        });
-    }
-
-    // Parse the accumulated javaOutput and insert data into MySQL
-    const tickets = parseJavaOutput(javaOutput);
-    insertTicketsIntoDB(tickets, (err) => {
-        if (err) {
-            console.error(`Error inserting data into MySQL: ${err.message}`);
-            res.status(500).send('Error generating tickets.');
         } else {
-            res.send(`Tickets for ${numSets} sets generated and saved successfully.`);
+            console.error(`Error generating tickets. Java process exited with code ${code}`);
+            res.status(500).send('Error generating tickets.');
         }
     });
 });
@@ -123,15 +115,12 @@ function insertTicketsIntoDB(tickets, callback) {
     });
 }
 
-
-
-// Helper function to parse Java output and convert it to an array of ticket objects
 // Helper function to parse Java output and convert it to an array of ticket objects
 function parseJavaOutput(javaOutput) {
-    const ticketsArray = javaOutput.trim().split('\r\n\r\n');
+    const ticketsArray = javaOutput.trim().split('\n\n\n'); // Assuming three new lines separate tickets
 
     const tickets = ticketsArray.map((ticketString) => {
-        const rows = ticketString.trim().split('\r\n');
+        const rows = ticketString.split('\n');
 
         return {
             row1: rows[0].split(',').map(Number),
@@ -143,9 +132,10 @@ function parseJavaOutput(javaOutput) {
     return tickets;
 }
 
-
-// ... (rest of your code)
+// ... (rest of your existing code)
 
 app.listen(port, () => {
     console.log(`Server is running at http://localhost:${port}`);
 });
+
+
